@@ -4,7 +4,7 @@ from smbus2 import SMBus
 from vpython import box, vector, rate, scene
 
 # I2C setup
-I2C_BUS = 1  # Usually 1 for Raspberry Pi and Ubuntu
+I2C_BUS = 8
 MPU9250_ADDR = 0x68  # MPU9250 I2C address
 
 # MPU9250 Register Map
