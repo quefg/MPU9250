@@ -1,10 +1,10 @@
 import time
 import numpy as np
 from smbus2 import SMBus
-from vpython import vector, box, rate, scene
+from vpython import box, vector, rate, scene
 
 # I2C setup
-I2C_BUS = 8  # Change based on your system
+I2C_BUS = 8
 MPU9250_ADDR = 0x68  # MPU9250 I2C address
 
 # MPU9250 Register Map
@@ -15,16 +15,20 @@ ACCEL_CONFIG = 0x1C
 GYRO_CONFIG = 0x1B
 
 # Constants
-dt = 0.02  # Sampling period (seconds)
+dt = 20  # Sampling period in milliseconds
 gravity = 9.81  # Earth's gravity (m/s^2)
 
 # 3D Visualization Setup
 scene.background = vector(0.2, 0.2, 0.2)
 scene.title = "MPU9250 Visualization"
-mpu_box = box(size=vector(1, 1, 1), color=vector(0, 1, 0))  # 3D object
+mpu_box = box(
+    size=vector(1.004, 0.606, 0.118),  # Real board dimensions in inches
+    color=vector(0, 1, 0)
+)
 
 # Initial orientation (calibration step)
 initial_accel = None
+gyro_angle = np.array([0.0, 0.0, 0.0])  # Tracks rotation angles
 
 # I2C Functions
 def read_i2c_word(bus, addr, reg):
@@ -75,16 +79,27 @@ with SMBus(I2C_BUS) as bus:
     position = np.array([0.0, 0.0, 0.0])
 
     while True:
-        rate(50)  # Update at 50 Hz
-        accel, gyro = read_accel_gyro(bus)
-        linear_accel = remove_gravity(accel)
-        
-        # Integrate acceleration for velocity
-        velocity += linear_accel * dt
+        rate(1000 / dt)  # Control refresh rate for integer `dt`
 
-        # Integrate velocity for position
-        position += velocity * dt
+        # Read data from sensor
+        accel, gyro = read_accel_gyro(bus)
+
+        # Remove gravity
+        linear_accel = remove_gravity(accel)
+
+        # Calculate velocity (integral of acceleration)
+        velocity += linear_accel * (dt / 1000.0)  # Convert dt to seconds
+
+        # Calculate position (integral of velocity)
+        position += velocity * (dt / 1000.0)  # Convert dt to seconds
+
+        # Update rotation angles using gyroscope data
+        gyro_angle += gyro * (dt / 1000.0)  # Convert dt to seconds
 
         # Update 3D visualization
         mpu_box.pos = vector(position[0], position[1], position[2])  # Position update
-        mpu_box.axis = vector(gyro[0], gyro[1], gyro[2])  # Rotation update
+        mpu_box.axis = vector(
+            np.cos(np.radians(gyro_angle[0])),
+            np.cos(np.radians(gyro_angle[1])),
+            np.cos(np.radians(gyro_angle[2]))
+        )  # Rotation update
