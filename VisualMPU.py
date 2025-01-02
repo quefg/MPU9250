@@ -15,7 +15,7 @@ ACCEL_CONFIG = 0x1C
 GYRO_CONFIG = 0x1B
 
 # Constants
-dt = 0.02  # Sampling period (adjust based on your sensor data rate)
+dt = 20  # Sampling period in milliseconds (integer-based now)
 gravity = 9.81  # Earth's gravity (m/s^2)
 
 # Initialize position, velocity, and acceleration
@@ -42,12 +42,12 @@ def read_i2c_word(bus, addr, reg):
 
 def read_accel_gyro(bus):
     """Read accelerometer and gyroscope data from MPU9250."""
-    ax = read_i2c_word(bus, MPU9250_ADDR, ACCEL_XOUT_H) / 16384.0  # Scale for ±2g
-    ay = read_i2c_word(bus, MPU9250_ADDR, ACCEL_XOUT_H + 2) / 16384.0
-    az = read_i2c_word(bus, MPU9250_ADDR, ACCEL_XOUT_H + 4) / 16384.0
-    gx = read_i2c_word(bus, MPU9250_ADDR, GYRO_XOUT_H) / 131.0  # Scale for ±250°/s
-    gy = read_i2c_word(bus, MPU9250_ADDR, GYRO_XOUT_H + 2) / 131.0
-    gz = read_i2c_word(bus, MPU9250_ADDR, GYRO_XOUT_H + 4) / 131.0
+    ax = int(read_i2c_word(bus, MPU9250_ADDR, ACCEL_XOUT_H)) / 16384  # Scale for ±2g
+    ay = int(read_i2c_word(bus, MPU9250_ADDR, ACCEL_XOUT_H + 2)) / 16384
+    az = int(read_i2c_word(bus, MPU9250_ADDR, ACCEL_XOUT_H + 4)) / 16384
+    gx = int(read_i2c_word(bus, MPU9250_ADDR, GYRO_XOUT_H)) / 131  # Scale for ±250°/s
+    gy = int(read_i2c_word(bus, MPU9250_ADDR, GYRO_XOUT_H + 2)) / 131
+    gz = int(read_i2c_word(bus, MPU9250_ADDR, GYRO_XOUT_H + 4)) / 131
     return np.array([ax, ay, az]), np.array([gx, gy, gz])
 
 def setup_mpu(bus):
@@ -79,7 +79,7 @@ with SMBus(I2C_BUS) as bus:
     calibrate_sensor(bus)
 
     while True:
-        rate(1 / dt)  # Control refresh rate
+        rate(1000 / dt)  # Control refresh rate for integer `dt`
 
         # Read data from sensor
         accel, gyro = read_accel_gyro(bus)
@@ -88,12 +88,11 @@ with SMBus(I2C_BUS) as bus:
         linear_accel = remove_gravity(accel)
 
         # Calculate velocity (integral of acceleration)
-        velocity += linear_accel * dt
+        velocity += linear_accel * (dt / 1000.0)  # Convert dt to seconds
 
         # Calculate position (integral of velocity)
-        position += velocity * dt
+        position += velocity * (dt / 1000.0)  # Convert dt to seconds
 
         # Update 3D visualization
         mpu_box.pos = vector(position[0], position[1], position[2])
         mpu_box.axis = vector(gyro[0], gyro[1], gyro[2])  # Orient based on gyroscope data
-        
