@@ -73,6 +73,7 @@ def remove_gravity(accel):
 
 # Main Program (Jupyter-Compatible)
 def run_visualization():
+    global gyro_angle  # Declare gyro_angle as global
     with SMBus(I2C_BUS) as bus:
         setup_mpu(bus)
         calibrate_sensor(bus)
@@ -94,7 +95,7 @@ def run_visualization():
             position += velocity * dt
 
             # Update rotation angles using gyroscope data
-            gyro_angle += gyro * dt
+            gyro_angle += gyro * dt  # Update global gyro_angle
 
             # Update visualization
             mpu_box.pos = vector(position[0], position[1], position[2])
