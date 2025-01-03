@@ -1,7 +1,7 @@
 import time
 import numpy as np
 from smbus2 import SMBus
-from vpython import vector, box, rate, scene
+from vpython import vector, box, rate, scene, cylinder
 
 # I2C setup
 I2C_BUS = 8  # Update with your I2C bus number
@@ -45,31 +45,36 @@ def setup_mpu(bus):
 # Visualization Setup
 scene.background = vector(0.2, 0.2, 0.2)
 scene.title = "MPU9250 3D Visualization"
+scene.range = 2  # Adjust the view range
+
+# Draw reference XYZ axes
+x_axis = cylinder(pos=vector(0, 0, 0), axis=vector(2, 0, 0), radius=0.02, color=vector(1, 0, 0))
+y_axis = cylinder(pos=vector(0, 0, 0), axis=vector(0, 2, 0), radius=0.02, color=vector(0, 1, 0))
+z_axis = cylinder(pos=vector(0, 0, 0), axis=vector(0, 0, 2), radius=0.02, color=vector(0, 0, 1))
+
 mpu_box = box(
     size=vector(1.004, 0.606, 0.118),  # Dimensions in inches
     color=vector(0, 1, 0)
 )
 
 # Initial orientation (calibration step)
-initial_accel = None
+initial_orientation = np.array([0.0, 0.0, 0.0])  # Reference orientation (calibrated)
 gyro_angle = np.array([0.0, 0.0, 0.0])  # Tracks rotation angles
 orientation = np.array([0.0, 0.0, 0.0])  # Tracks filtered orientation
 
 def calibrate_sensor(bus):
     """Calibrate the sensor to get the initial orientation."""
-    global initial_accel
-    print("Calibrating sensor... Hold the MPU steady.")
+    global initial_orientation
+    print("Calibrating sensor... Place it upright on a flat surface.")
     time.sleep(3)
     samples = []
     for _ in range(50):
         accel, _ = read_accel_gyro(bus)
         samples.append(accel)
-    initial_accel = np.mean(samples, axis=0)
-    print(f"Initial acceleration calibrated: {initial_accel}")
-
-def remove_gravity(accel):
-    """Remove gravity component."""
-    return accel - initial_accel
+    avg_accel = np.mean(samples, axis=0)
+    initial_orientation[0] = np.arctan2(avg_accel[1], avg_accel[2]) * 180 / np.pi
+    initial_orientation[1] = np.arctan2(-avg_accel[0], np.sqrt(avg_accel[1]**2 + avg_accel[2]**2)) * 180 / np.pi
+    print(f"Initial orientation: {initial_orientation}")
 
 # Main Program
 def run_visualization():
@@ -98,8 +103,8 @@ def run_visualization():
             gyro_angle[2] += gyro[2] * dt
 
             # Complementary filter to combine accelerometer and gyroscope data
-            orientation[0] = alpha * (orientation[0] + gyro[0] * dt) + (1 - alpha) * accel_roll
-            orientation[1] = alpha * (orientation[1] + gyro[1] * dt) + (1 - alpha) * accel_pitch
+            orientation[0] = alpha * (orientation[0] + gyro[0] * dt) + (1 - alpha) * (accel_roll - initial_orientation[0])
+            orientation[1] = alpha * (orientation[1] + gyro[1] * dt) + (1 - alpha) * (accel_pitch - initial_orientation[1])
             orientation[2] = gyro_angle[2]  # Use only gyroscope for yaw (no accel info for yaw)
 
             # Update 3D visualization
