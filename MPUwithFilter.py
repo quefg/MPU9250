@@ -4,10 +4,9 @@ from smbus2 import SMBus
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import QTimer
 import pyqtgraph.opengl as gl
-from pyqtgraph import Vector
 
 # I2C setup
-I2C_BUS = 8
+I2C_BUS = 8  # Update with your I2C bus number
 MPU9250_ADDR = 0x68
 
 # MPU9250 Register Map
@@ -22,17 +21,21 @@ gravity = 9.81  # Earth's gravity (m/s^2)
 # I2C Functions
 def read_i2c_word(bus, addr, reg):
     """Read two bytes from I2C and combine into a signed word."""
-    high = bus.read_byte_data(addr, reg)
-    low = bus.read_byte_data(addr, reg + 1)
-    value = (high << 8) | low
-    return value - 65536 if value > 32768 else value
+    try:
+        high = bus.read_byte_data(addr, reg)
+        low = bus.read_byte_data(addr, reg + 1)
+        value = (high << 8) | low
+        return value - 65536 if value > 32768 else value
+    except Exception as e:
+        print(f"I2C Read Error: {e}")
+        return 0
 
 def read_accel_gyro(bus):
     """Read accelerometer and gyroscope data."""
-    ax = read_i2c_word(bus, MPU9250_ADDR, ACCEL_XOUT_H) / 16384.0
+    ax = read_i2c_word(bus, MPU9250_ADDR, ACCEL_XOUT_H) / 16384.0  # Scale for ±2g
     ay = read_i2c_word(bus, MPU9250_ADDR, ACCEL_XOUT_H + 2) / 16384.0
     az = read_i2c_word(bus, MPU9250_ADDR, ACCEL_XOUT_H + 4) / 16384.0
-    gx = read_i2c_word(bus, MPU9250_ADDR, GYRO_XOUT_H) / 131.0
+    gx = read_i2c_word(bus, MPU9250_ADDR, GYRO_XOUT_H) / 131.0  # Scale for ±250°/s
     gy = read_i2c_word(bus, MPU9250_ADDR, GYRO_XOUT_H + 2) / 131.0
     gz = read_i2c_word(bus, MPU9250_ADDR, GYRO_XOUT_H + 4) / 131.0
     return np.array([ax, ay, az]), np.array([gx, gy, gz])
@@ -55,8 +58,9 @@ class MPUVisualization(gl.GLViewWidget):
         self.addItem(grid)
 
         # Add a 3D box (sensor representation)
+        meshdata = gl.MeshData.cube()
         self.sensor = gl.GLMeshItem(
-            meshdata=gl.MeshData.cube(),
+            meshdata=meshdata,
             color=(0, 1, 0, 0.5),
             smooth=False,
             shader="shaded",
@@ -72,40 +76,44 @@ class MPUVisualization(gl.GLViewWidget):
         self.sensor.rotate(angles[2], 0, 0, 1)  # Rotate around z-axis
 
 # Main Application
-app = QApplication(sys.argv)
-viewer = MPUVisualization()
+def main():
+    app = QApplication(sys.argv)
+    viewer = MPUVisualization()
 
-with SMBus(I2C_BUS) as bus:
-    setup_mpu(bus)
+    with SMBus(I2C_BUS) as bus:
+        setup_mpu(bus)
 
-    velocity = np.array([0.0, 0.0, 0.0])
-    position = np.array([0.0, 0.0, 0.0])
-    angles = np.array([0.0, 0.0, 0.0])  # Tracks rotation angles
+        velocity = np.array([0.0, 0.0, 0.0])
+        position = np.array([0.0, 0.0, 0.0])
+        angles = np.array([0.0, 0.0, 0.0])  # Tracks rotation angles
 
-    def update():
-        global velocity, position, angles
+        def update():
+            nonlocal velocity, position, angles
 
-        accel, gyro = read_accel_gyro(bus)
+            accel, gyro = read_accel_gyro(bus)
 
-        # Remove gravity (assuming calibration is done; modify as needed)
-        accel -= np.array([0, 0, gravity])
+            # Remove gravity (assuming calibration is done; modify as needed)
+            accel -= np.array([0, 0, gravity])
 
-        # Integrate acceleration to calculate velocity
-        velocity += accel * dt
+            # Integrate acceleration to calculate velocity
+            velocity += accel * dt
 
-        # Integrate velocity to calculate position
-        position += velocity * dt
+            # Integrate velocity to calculate position
+            position += velocity * dt
 
-        # Update angles using gyroscope data
-        angles += gyro * dt
+            # Update angles using gyroscope data
+            angles += gyro * dt
 
-        # Update visualization
-        viewer.update_orientation(angles)
+            # Update visualization
+            viewer.update_orientation(angles)
 
-    # Set up a timer for real-time updates
-    timer = QTimer()
-    timer.timeout.connect(update)
-    timer.start(20)  # 50 Hz refresh rate
+        # Set up a timer for real-time updates
+        timer = QTimer()
+        timer.timeout.connect(update)
+        timer.start(20)  # 50 Hz refresh rate
 
-viewer.show()
-sys.exit(app.exec_())
+    viewer.show()
+    sys.exit(app.exec_())
+
+if __name__ == "__main__":
+    main()
