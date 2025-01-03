@@ -1,7 +1,7 @@
 import time
 import numpy as np
 from smbus2 import SMBus
-from vpython import box, vector, rate, scene, label
+from vpython import box, vector, rate, scene, arrow, label
 
 # I2C setup
 I2C_BUS = 8
@@ -21,11 +21,22 @@ gravity = 9.81  # Earth's gravity (m/s^2)
 # 3D Visualization Setup
 scene.background = vector(0.2, 0.2, 0.2)
 scene.title = "MPU9250 Visualization"
+scene.width = 800
+scene.height = 600
+
+# MPU 3D Box
 mpu_box = box(
     size=vector(1.004, 0.606, 0.118),  # Real board dimensions in inches
     color=vector(0, 1, 0)
 )
-info_label = label(pos=vector(0, -2, 0), text="")
+
+# Axes
+x_axis = arrow(pos=vector(0, 0, 0), axis=vector(2, 0, 0), color=vector(1, 0, 0))  # Red for X
+y_axis = arrow(pos=vector(0, 0, 0), axis=vector(0, 2, 0), color=vector(0, 1, 0))  # Green for Y
+z_axis = arrow(pos=vector(0, 0, 0), axis=vector(0, 0, 2), color=vector(0, 0, 1))  # Blue for Z
+
+# Labels
+info_label = label(pos=vector(0, -2, 0), text="Initializing...")
 
 # Initial orientation (calibration step)
 initial_accel = None
@@ -84,18 +95,14 @@ with SMBus(I2C_BUS) as bus:
     position = np.array([0.0, 0.0, 0.0])
 
     while True:
-        rate(1000 / dt)  # Control refresh rate for integer `dt`
-
-        # Read data from sensor
+        rate(50)  # Update rate in Hz
         accel, gyro = read_accel_gyro(bus)
-
-        # Remove gravity
         linear_accel = remove_gravity(accel)
 
-        # Calculate velocity (integral of acceleration)
+        # Integrate acceleration for velocity
         velocity += linear_accel * (dt / 1000.0)  # Convert dt to seconds
 
-        # Calculate position (integral of velocity)
+        # Integrate velocity for position
         position += velocity * (dt / 1000.0)  # Convert dt to seconds
 
         # Update rotation angles using gyroscope data
@@ -107,7 +114,16 @@ with SMBus(I2C_BUS) as bus:
             np.cos(np.radians(gyro_angle[0])),
             np.cos(np.radians(gyro_angle[1])),
             np.cos(np.radians(gyro_angle[2]))
-        )  # Rotation update
+        )  # Orientation update
 
-        # Display information
-        info_label.text = f"Pos: {position}, Vel: {velocity}, Angles: {gyro_angle}"
+        # Update axes
+        x_axis.axis = vector(2 * np.cos(np.radians(gyro_angle[0])), 0, 0)
+        y_axis.axis = vector(0, 2 * np.cos(np.radians(gyro_angle[1])), 0)
+        z_axis.axis = vector(0, 0, 2 * np.cos(np.radians(gyro_angle[2])))
+
+        # Display sensor data
+        info_label.text = (
+            f"Position: {position}\n"
+            f"Velocity: {velocity}\n"
+            f"Angles: Roll: {gyro_angle[0]:.2f}, Pitch: {gyro_angle[1]:.2f}, Yaw: {gyro_angle[2]:.2f}"
+        )
