@@ -2,7 +2,8 @@ import sys
 import numpy as np
 from smbus2 import SMBus
 from PyQt5.QtWidgets import QApplication
-from pyqtgraph.opengl import GLViewWidget, GLGridItem, GLMeshItem
+from PyQt5.QtCore import QTimer
+import pyqtgraph.opengl as gl
 from pyqtgraph import Vector
 
 # I2C setup
@@ -20,6 +21,7 @@ gravity = 9.81  # Earth's gravity (m/s^2)
 
 # I2C Functions
 def read_i2c_word(bus, addr, reg):
+    """Read two bytes from I2C and combine into a signed word."""
     high = bus.read_byte_data(addr, reg)
     low = bus.read_byte_data(addr, reg + 1)
     value = (high << 8) | low
@@ -40,20 +42,21 @@ def setup_mpu(bus):
     bus.write_byte_data(MPU9250_ADDR, PWR_MGMT_1, 0x00)  # Wake up MPU9250
 
 # PyQtGraph Visualization Class
-class MPUVisualization(GLViewWidget):
+class MPUVisualization(gl.GLViewWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("MPU9250 Real-Time Visualization")
         self.setGeometry(100, 100, 800, 600)
 
         # Add a grid for reference
-        grid = GLGridItem()
+        grid = gl.GLGridItem()
         grid.setSize(x=10, y=10)
+        grid.setSpacing(x=1, y=1)
         self.addItem(grid)
 
         # Add a 3D box (sensor representation)
-        self.sensor = GLMeshItem(
-            meshdata=pyqtgraph.opengl.MeshData.cube(),
+        self.sensor = gl.GLMeshItem(
+            meshdata=gl.MeshData.cube(),
             color=(0, 1, 0, 0.5),
             smooth=False,
             shader="shaded",
@@ -63,8 +66,10 @@ class MPUVisualization(GLViewWidget):
 
     def update_orientation(self, angles):
         """Update the sensor orientation."""
-        rotation = Vector(angles[0], angles[1], angles[2])
-        self.sensor.rotate(angle=np.linalg.norm(rotation), x=rotation[0], y=rotation[1], z=rotation[2])
+        self.sensor.resetTransform()
+        self.sensor.rotate(angles[0], 1, 0, 0)  # Rotate around x-axis
+        self.sensor.rotate(angles[1], 0, 1, 0)  # Rotate around y-axis
+        self.sensor.rotate(angles[2], 0, 0, 1)  # Rotate around z-axis
 
 # Main Application
 app = QApplication(sys.argv)
