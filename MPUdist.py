@@ -16,6 +16,8 @@ PWR_MGMT_1 = 0x6B
 dt = 0.02  # Sampling period in seconds (50 Hz)
 alpha = 0.98  # Complementary filter coefficient
 gravity = 9.81  # Gravity in m/s^2
+stable_threshold = 0.02  # Threshold for stability in acceleration
+stable_time = 5  # Time in seconds for the sensor to be considered stable
 
 # I2C Functions
 def read_i2c_word(bus, addr, reg):
@@ -67,6 +69,8 @@ initial_orientation = np.array([0.0, 0.0, 0.0])  # Reference orientation (calibr
 orientation = np.array([0.0, 0.0, 0.0])  # Tracks filtered orientation
 velocity = np.array([0.0, 0.0, 0.0])  # Velocity in m/s
 position = np.array([0.0, 0.0, 0.0])  # Position in meters
+stable_start_time = None  # Time when stability starts
+measuring_distance = False  # Flag for measuring distance
 
 def calibrate_sensor(bus):
     """Calibrate the sensor to get the initial orientation."""
@@ -82,9 +86,13 @@ def calibrate_sensor(bus):
     initial_orientation[1] = np.arctan2(-avg_accel[0], np.sqrt(avg_accel[1]**2 + avg_accel[2]**2)) * 180 / np.pi
     print(f"Initial orientation: {initial_orientation}")
 
+def is_stable(accel):
+    """Check if the accelerometer readings are stable."""
+    return np.all(np.abs(accel) < stable_threshold)
+
 # Main Program
 def run_visualization():
-    global orientation, velocity, position
+    global orientation, velocity, position, stable_start_time, measuring_distance
 
     with SMBus(I2C_BUS) as bus:
         setup_mpu(bus)
@@ -98,11 +106,25 @@ def run_visualization():
             linear_accel = accel * gravity  # Convert to m/s^2
             linear_accel[2] -= gravity  # Subtract gravity from Z-axis
 
-            # Integrate acceleration to calculate velocity
-            velocity += linear_accel * dt
+            # Check if the device is stable
+            if is_stable(accel):
+                if stable_start_time is None:
+                    stable_start_time = time.time()
+                elif time.time() - stable_start_time >= stable_time and not measuring_distance:
+                    measuring_distance = True
+                    velocity = np.array([0.0, 0.0, 0.0])
+                    position = np.array([0.0, 0.0, 0.0])
+                    print("Device stable for 5 seconds. Measuring distance.")
+            else:
+                stable_start_time = None
 
-            # Integrate velocity to calculate position
-            position += velocity * dt
+            # Measure distance only if movement is detected
+            if measuring_distance and not is_stable(accel):
+                # Integrate acceleration to calculate velocity
+                velocity += linear_accel * dt
+
+                # Integrate velocity to calculate position
+                position += velocity * dt
 
             # Calculate tilt angles from accelerometer
             accel_pitch = np.arctan2(accel[1], accel[2]) * 180 / np.pi
