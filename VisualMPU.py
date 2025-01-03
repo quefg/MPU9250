@@ -1,7 +1,7 @@
 import time
 import numpy as np
 from smbus2 import SMBus
-from vpython import vector, box, rate, scene, label
+from vpython import vector, box, rate, scene
 
 # I2C setup
 I2C_BUS = 8  # Update with your I2C bus number
@@ -13,8 +13,8 @@ GYRO_XOUT_H = 0x43
 PWR_MGMT_1 = 0x6B
 
 # Constants
-dt = 0.02  # Sampling period in seconds
-gravity = 9.81  # Earth's gravity (m/s^2)
+dt = 0.02  # Sampling period in seconds (50 Hz)
+alpha = 0.98  # Complementary filter coefficient
 
 # I2C Functions
 def read_i2c_word(bus, addr, reg):
@@ -49,11 +49,11 @@ mpu_box = box(
     size=vector(1.004, 0.606, 0.118),  # Dimensions in inches
     color=vector(0, 1, 0)
 )
-info_label = label(pos=vector(0, -2, 0), text="")
 
 # Initial orientation (calibration step)
 initial_accel = None
 gyro_angle = np.array([0.0, 0.0, 0.0])  # Tracks rotation angles
+orientation = np.array([0.0, 0.0, 0.0])  # Tracks filtered orientation
 
 def calibrate_sensor(bus):
     """Calibrate the sensor to get the initial orientation."""
@@ -71,40 +71,43 @@ def remove_gravity(accel):
     """Remove gravity component."""
     return accel - initial_accel
 
-# Main Program (Jupyter-Compatible)
+# Main Program
 def run_visualization():
-    global gyro_angle  # Declare gyro_angle as global
+    global gyro_angle, orientation
+
     with SMBus(I2C_BUS) as bus:
         setup_mpu(bus)
         calibrate_sensor(bus)
-
-        velocity = np.array([0.0, 0.0, 0.0])
-        position = np.array([0.0, 0.0, 0.0])
 
         while True:
             rate(50)  # Update rate 50 Hz
             accel, gyro = read_accel_gyro(bus)
 
-            # Remove gravity
-            linear_accel = remove_gravity(accel)
+            # Normalize accelerometer data for tilt estimation
+            accel_norm = np.linalg.norm(accel)
+            if accel_norm != 0:
+                accel = accel / accel_norm
 
-            # Integrate acceleration for velocity
-            velocity += linear_accel * dt
+            # Calculate tilt angles from accelerometer
+            accel_pitch = np.arctan2(accel[1], accel[2]) * 180 / np.pi
+            accel_roll = np.arctan2(-accel[0], np.sqrt(accel[1]**2 + accel[2]**2)) * 180 / np.pi
 
-            # Integrate velocity for position
-            position += velocity * dt
+            # Integrate gyroscope data for angles
+            gyro_angle[0] += gyro[0] * dt
+            gyro_angle[1] += gyro[1] * dt
+            gyro_angle[2] += gyro[2] * dt
 
-            # Update rotation angles using gyroscope data
-            gyro_angle += gyro * dt  # Update global gyro_angle
+            # Complementary filter to combine accelerometer and gyroscope data
+            orientation[0] = alpha * (orientation[0] + gyro[0] * dt) + (1 - alpha) * accel_roll
+            orientation[1] = alpha * (orientation[1] + gyro[1] * dt) + (1 - alpha) * accel_pitch
+            orientation[2] = gyro_angle[2]  # Use only gyroscope for yaw (no accel info for yaw)
 
-            # Update visualization
-            mpu_box.pos = vector(position[0], position[1], position[2])
+            # Update 3D visualization
             mpu_box.axis = vector(
-                np.cos(np.radians(gyro_angle[0])),
-                np.cos(np.radians(gyro_angle[1])),
-                np.cos(np.radians(gyro_angle[2]))
+                np.sin(np.radians(orientation[0])),
+                np.sin(np.radians(orientation[1])),
+                np.cos(np.radians(orientation[2]))
             )
-            info_label.text = f"Pos: {position}, Vel: {velocity}, Angles: {gyro_angle}"
 
-# Call the function to start visualization
+# Run the visualization
 run_visualization()
