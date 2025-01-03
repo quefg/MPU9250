@@ -82,29 +82,6 @@ def calibrate_sensor(bus):
     initial_orientation[1] = np.arctan2(-avg_accel[0], np.sqrt(avg_accel[1]**2 + avg_accel[2]**2)) * 180 / np.pi
     print(f"Initial orientation: {initial_orientation}")
 
-def get_rotation_matrix(pitch, roll, yaw):
-    """Calculate the 3D rotation matrix."""
-    pitch = np.radians(pitch)
-    roll = np.radians(roll)
-    yaw = np.radians(yaw)
-
-    R_x = np.array([
-        [1, 0, 0],
-        [0, np.cos(roll), -np.sin(roll)],
-        [0, np.sin(roll), np.cos(roll)]
-    ])
-    R_y = np.array([
-        [np.cos(pitch), 0, np.sin(pitch)],
-        [0, 1, 0],
-        [-np.sin(pitch), 0, np.cos(pitch)]
-    ])
-    R_z = np.array([
-        [np.cos(yaw), -np.sin(yaw), 0],
-        [np.sin(yaw), np.cos(yaw), 0],
-        [0, 0, 1]
-    ])
-    return R_z @ R_y @ R_x
-
 # Main Program
 def run_visualization():
     global orientation, velocity, position
@@ -117,31 +94,32 @@ def run_visualization():
             rate(50)  # Update rate 50 Hz
             accel, gyro = read_accel_gyro(bus)
 
+            # Remove gravity from accelerometer data
+            linear_accel = accel * gravity  # Convert to m/s^2
+            linear_accel[2] -= gravity  # Subtract gravity from Z-axis
+
+            # Integrate acceleration to calculate velocity
+            velocity += linear_accel * dt
+
+            # Integrate velocity to calculate position
+            position += velocity * dt
+
             # Calculate tilt angles from accelerometer
             accel_pitch = np.arctan2(accel[1], accel[2]) * 180 / np.pi
             accel_roll = np.arctan2(-accel[0], np.sqrt(accel[1]**2 + accel[2]**2)) * 180 / np.pi
 
             # Complementary filter to combine accelerometer and gyroscope data
-            orientation[0] = alpha * (orientation[0] + gyro[0] * dt) + (1 - alpha) * (accel_roll - initial_orientation[0])
-            orientation[1] = alpha * (orientation[1] + gyro[1] * dt) + (1 - alpha) * (accel_pitch - initial_orientation[1])
+            orientation[0] = alpha * (orientation[0] + gyro[0] * dt) + (1 - alpha) * accel_roll
+            orientation[1] = alpha * (orientation[1] + gyro[1] * dt) + (1 - alpha) * accel_pitch
             orientation[2] += gyro[2] * dt  # Gyroscope-only yaw
 
-            # Remove gravity for linear acceleration
-            linear_accel = accel * gravity  # Convert to m/s^2
-            linear_accel[2] -= gravity  # Remove gravity component
-
-            # Integrate linear acceleration for velocity
-            velocity += linear_accel * dt
-
-            # Integrate velocity for position
-            position += velocity * dt
-
-            # Update rotation matrix
-            R = get_rotation_matrix(orientation[1], orientation[0], orientation[2])
-
-            # Apply rotation matrix to box
-            mpu_box.axis = vector(R[0, 2], R[1, 2], R[2, 2])
-            mpu_box.up = vector(R[0, 1], R[1, 1], R[2, 1])
+            # Update 3D visualization
+            mpu_box.axis = vector(
+                np.sin(np.radians(orientation[0])),
+                np.sin(np.radians(orientation[1])),
+                np.cos(np.radians(orientation[2]))
+            )
+            mpu_box.up = vector(0, 1, 0)
 
             # Update labels
             angle_label.text = f"Angles (Pitch, Roll, Yaw): {np.round(orientation, 2)}"
