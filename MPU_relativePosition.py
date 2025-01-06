@@ -15,11 +15,19 @@ PWR_MGMT_1 = 0x6B
 # Constants
 dt = 0.02  # Sampling period in seconds (50 Hz)
 alpha = 0.98  # Complementary filter coefficient
-gravity = 9.81  # Gravity in m/s^2
+gravity = 9.81  # Gravity in m/s²
+gyro_scale = 131.0  # Scale for ±250°/s
+
+# Initial states
+velocity = np.array([0.0, 0.0, 0.0])  # Initial velocity (vx, vy, vz) in m/s
+position = np.array([0.0, 0.0, 0.0])  # Initial position (x, y, z) in meters
+initial_position = np.array([0.0, 0.0, 0.0])  # Reference position
+orientation = np.array([0.0, 0.0, 0.0])  # Tracks filtered orientation
+initial_orientation = np.array([0.0, 0.0, 0.0])  # Reference orientation for angles
 
 # Visualization Setup
 scene.background = vector(0.2, 0.2, 0.2)
-scene.title = "MPU9250 3D Visualization with Acceleration Data"
+scene.title = "MPU9250 3D Visualization with Real-Time Data"
 scene.range = 2
 
 # Draw reference XYZ axes
@@ -32,11 +40,10 @@ mpu_box = box(
     color=vector(0, 1, 0)
 )
 
+# Labels
 angle_label = label(pos=vector(0, -2, 0), text="Angles: ")
 accel_label = label(pos=vector(0, -2.5, 0), text="Acceleration: ")
-
-# Initial orientation (calibration step)
-orientation = np.array([0.0, 0.0, 0.0])  # Tracks filtered orientation
+position_label = label(pos=vector(0, -3, 0), text="Position: ")
 
 # I2C Functions
 def read_i2c_word(bus, addr, reg):
@@ -55,14 +62,29 @@ def read_accel_gyro(bus):
     ax = read_i2c_word(bus, MPU9250_ADDR, ACCEL_XOUT_H) / 16384.0  # Scale for ±2g
     ay = read_i2c_word(bus, MPU9250_ADDR, ACCEL_XOUT_H + 2) / 16384.0
     az = read_i2c_word(bus, MPU9250_ADDR, ACCEL_XOUT_H + 4) / 16384.0
-    gx = read_i2c_word(bus, MPU9250_ADDR, GYRO_XOUT_H) / 131.0  # Scale for ±250°/s
-    gy = read_i2c_word(bus, MPU9250_ADDR, GYRO_XOUT_H + 2) / 131.0
-    gz = read_i2c_word(bus, MPU9250_ADDR, GYRO_XOUT_H + 4) / 131.0
+    gx = read_i2c_word(bus, MPU9250_ADDR, GYRO_XOUT_H) / gyro_scale  # Scale for ±250°/s
+    gy = read_i2c_word(bus, MPU9250_ADDR, GYRO_XOUT_H + 2) / gyro_scale
+    gz = read_i2c_word(bus, MPU9250_ADDR, GYRO_XOUT_H + 4) / gyro_scale
     return np.array([ax, ay, az]), np.array([gx, gy, gz])
 
 def setup_mpu(bus):
     """Initialize MPU9250."""
     bus.write_byte_data(MPU9250_ADDR, PWR_MGMT_1, 0x00)  # Wake up MPU9250
+
+def calibrate_sensor(bus):
+    """Calibrate the sensor to get the initial orientation and position."""
+    global initial_orientation, initial_position
+    print("Calibrating sensor... Place it upright on a flat surface.")
+    time.sleep(3)
+    samples = []
+    for _ in range(50):
+        accel, _ = read_accel_gyro(bus)
+        samples.append(accel)
+    avg_accel = np.mean(samples, axis=0)
+    initial_orientation[0] = np.arctan2(avg_accel[1], avg_accel[2]) * 180 / np.pi
+    initial_orientation[1] = np.arctan2(-avg_accel[0], np.sqrt(avg_accel[1]**2 + avg_accel[2]**2)) * 180 / np.pi
+    initial_position = np.array([0.0, 0.0, 0.0])  # Assume starting at the origin
+    print(f"Initial orientation: {initial_orientation}")
 
 def get_rotation_matrix(pitch, roll, yaw):
     """Calculate the 3D rotation matrix."""
@@ -89,10 +111,11 @@ def get_rotation_matrix(pitch, roll, yaw):
 
 # Main Program
 def run_visualization():
-    global orientation
+    global orientation, velocity, position, initial_position
 
     with SMBus(I2C_BUS) as bus:
         setup_mpu(bus)
+        calibrate_sensor(bus)
 
         while True:
             rate(50)  # Update rate 50 Hz
@@ -103,9 +126,18 @@ def run_visualization():
             accel_roll = np.arctan2(-accel[0], np.sqrt(accel[1]**2 + accel[2]**2)) * 180 / np.pi
 
             # Complementary filter to combine accelerometer and gyroscope data
-            orientation[0] = alpha * (orientation[0] + gyro[0] * dt) + (1 - alpha) * accel_roll
-            orientation[1] = alpha * (orientation[1] + gyro[1] * dt) + (1 - alpha) * accel_pitch
+            orientation[0] = alpha * (orientation[0] + gyro[0] * dt) + (1 - alpha) * (accel_roll - initial_orientation[0])
+            orientation[1] = alpha * (orientation[1] + gyro[1] * dt) + (1 - alpha) * (accel_pitch - initial_orientation[1])
             orientation[2] += gyro[2] * dt  # Gyroscope-only yaw
+
+            # Update position based on acceleration
+            accel_corrected = accel * gravity
+            accel_corrected[2] -= gravity  # Remove gravity from Z-axis
+            velocity += accel_corrected * dt
+            position += velocity * dt
+
+            # Calculate relative position
+            relative_position = position - initial_position
 
             # Update rotation matrix
             R = get_rotation_matrix(orientation[1], orientation[0], orientation[2])
@@ -116,7 +148,8 @@ def run_visualization():
 
             # Update labels
             angle_label.text = f"Angles (Pitch, Roll, Yaw): {np.round(orientation, 2)}"
-            accel_label.text = f"Acceleration (X, Y, Z): {np.round(accel * gravity, 2)} m/s²"
+            accel_label.text = f"Acceleration (X, Y, Z): {np.round(accel_corrected, 2)} m/s²"
+            position_label.text = f"Relative Position (X, Y, Z): {np.round(relative_position * 100, 2)} cm"
 
 # Run the visualization
 run_visualization()
