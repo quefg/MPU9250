@@ -61,6 +61,33 @@ def get_rotation_matrix(pitch, roll, yaw):
     R_z = np.array([[np.cos(yaw), -np.sin(yaw), 0], [np.sin(yaw), np.cos(yaw), 0], [0, 0, 1]])
     return R_z @ R_y @ R_x
 
+def read_i2c_word(bus, addr, reg):
+    """Read two bytes from I2C and combine into a signed word."""
+    try:
+        high = bus.read_byte_data(addr, reg)
+        low = bus.read_byte_data(addr, reg + 1)
+        value = (high << 8) | low
+        return value - 65536 if value > 32768 else value
+    except Exception as e:
+        print(f"I2C Read Error: {e}")
+        return 0
+
+def read_accel_gyro(bus):
+    """Read accelerometer and gyroscope data."""
+    try:
+        ax = read_i2c_word(bus, MPU9250_ADDR, ACCEL_XOUT_H) / 16384.0
+        ay = read_i2c_word(bus, MPU9250_ADDR, ACCEL_XOUT_H + 2) / 16384.0
+        az = read_i2c_word(bus, MPU9250_ADDR, ACCEL_XOUT_H + 4) / 16384.0
+
+        gx = read_i2c_word(bus, MPU9250_ADDR, GYRO_XOUT_H) / 131.0
+        gy = read_i2c_word(bus, MPU9250_ADDR, GYRO_XOUT_H + 2) / 131.0
+        gz = read_i2c_word(bus, MPU9250_ADDR, GYRO_XOUT_H + 4) / 131.0
+
+        return np.array([ax, ay, az]), np.array([gx, gy, gz])
+    except Exception as e:
+        print(f"I2C Read Error: {e}")
+        return np.array([0.0, 0.0, 0.0]), np.array([0.0, 0.0, 0.0])
+
 # Main loop
 def run_visualization():
     global velocity, distance, prev_accel, orientation
