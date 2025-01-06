@@ -66,9 +66,14 @@ accel_label_x = label(pos=vector(0, -2.5, 0), text="Accel X: 0.00 m/s²", color=
 accel_label_y = label(pos=vector(0, -2.8, 0), text="Accel Y: 0.00 m/s²", color=vector(0, 1, 0))
 accel_label_z = label(pos=vector(0, -3.1, 0), text="Accel Z: 0.00 m/s²", color=vector(0, 0, 1))
 
+# Labels for distance
+distance_label = label(pos=vector(0, -3.5, 0), text="Distance: X=0.00 m, Y=0.00 m, Z=0.00 m", color=vector(1, 1, 1))
+
 # Initial orientation (calibration step)
 initial_orientation = np.array([0.0, 0.0, 0.0])  # Reference orientation (calibrated)
 orientation = np.array([0.0, 0.0, 0.0])  # Tracks filtered orientation
+velocity = np.array([0.0, 0.0, 0.0])  # Initial velocity in m/s
+distance = np.array([0.0, 0.0, 0.0])  # Initial distance in meters
 
 def calibrate_sensor(bus):
     """Calibrate the sensor to get the initial orientation."""
@@ -107,9 +112,14 @@ def get_rotation_matrix(pitch, roll, yaw):
     ])
     return R_z @ R_y @ R_x
 
+def high_pass_filter(accel):
+    """Remove gravity from acceleration data."""
+    accel[2] -= 1.0  # Assuming gravity on Z-axis
+    return accel
+
 # Main Program
 def run_visualization():
-    global orientation
+    global orientation, velocity, distance
 
     with SMBus(I2C_BUS) as bus:
         setup_mpu(bus)
@@ -118,6 +128,15 @@ def run_visualization():
         while True:
             rate(50)  # Update rate 50 Hz
             accel, gyro = read_accel_gyro(bus)
+
+            # High-pass filter to remove gravity
+            accel_no_gravity = high_pass_filter(accel)
+
+            # Update velocity (v = u + at)
+            velocity += accel_no_gravity * gravity * dt
+
+            # Update distance (s = s + vt)
+            distance += velocity * dt
 
             # Calculate tilt angles from accelerometer
             accel_pitch = np.arctan2(accel[1], accel[2]) * 180 / np.pi
@@ -142,6 +161,9 @@ def run_visualization():
             accel_label_x.text = f"Accel X: {accel[0] * gravity:.2f} m/s²"
             accel_label_y.text = f"Accel Y: {accel[1] * gravity:.2f} m/s²"
             accel_label_z.text = f"Accel Z: {accel[2] * gravity:.2f} m/s²"
+
+            # Update distance label
+            distance_label.text = f"Distance: X={distance[0]:.2f} m, Y={distance[1]:.2f} m, Z={distance[2]:.2f} m"
 
 # Run the visualization
 run_visualization()
