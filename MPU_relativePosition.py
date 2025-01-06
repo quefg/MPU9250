@@ -34,6 +34,9 @@ mpu_box = box(size=vector(1.004, 0.606, 0.118), color=vector(0, 1, 0))
 # Labels
 angle_label = label(pos=vector(0, -2, 0), text="Angles: ")
 distance_label = label(pos=vector(0, -3.5, 0), text="Distance: X=0.00 cm, Y=0.00 cm, Z=0.00 cm")
+accel_label_x = label(pos=vector(-1.5, -4, 0), text="Accel X: 0.00 m/s²", color=vector(1, 0, 0))
+accel_label_y = label(pos=vector(0, -4, 0), text="Accel Y: 0.00 m/s²", color=vector(0, 1, 0))
+accel_label_z = label(pos=vector(1.5, -4, 0), text="Accel Z: 0.00 m/s²", color=vector(0, 0, 1))
 
 # Initialize variables
 velocity = np.array([0.0, 0.0, 0.0])  # Velocity in m/s
@@ -127,6 +130,9 @@ def run_visualization():
             # Update labels
             angle_label.text = f"Angles (Pitch, Roll, Yaw): {np.round(orientation, 2)}"
             distance_label.text = f"Distance: X={distance[0]:.2f} cm, Y={distance[1]:.2f} cm, Z={distance[2]:.2f} cm"
+            accel_label_x.text = f"Accel X: {accel[0] * gravity:.2f} m/s²"
+            accel_label_y.text = f"Accel Y: {accel[1] * gravity:.2f} m/s²"
+            accel_label_z.text = f"Accel Z: {accel[2] * gravity:.2f} m/s²"
 
 # Run the visualization
 run_visualization()
