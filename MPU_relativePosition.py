@@ -16,7 +16,6 @@ PWR_MGMT_1 = 0x6B
 dt = 0.02  # Sampling period in seconds (50 Hz)
 alpha = 0.98  # Complementary filter coefficient
 gravity = 9.81  # Gravity in m/s^2
-distance_update_interval = 5  # Seconds to calculate and update distance
 
 # I2C Functions
 def read_i2c_word(bus, addr, reg):
@@ -54,19 +53,22 @@ x_axis = cylinder(pos=vector(0, 0, 0), axis=vector(2, 0, 0), radius=0.02, color=
 y_axis = cylinder(pos=vector(0, 0, 0), axis=vector(0, 2, 0), radius=0.02, color=vector(0, 1, 0))
 z_axis = cylinder(pos=vector(0, 0, 0), axis=vector(0, 0, 2), radius=0.02, color=vector(0, 0, 1))
 
-mpu_box = box(size=vector(1.004, 0.606, 0.118), color=vector(0, 1, 0))
+mpu_box = box(
+    size=vector(1.004, 0.606, 0.118),  # Dimensions in inches
+    color=vector(0, 1, 0)
+)
 
-# Labels
+# Labels for angles
 angle_label = label(pos=vector(0, -2, 0), text="Angles: ")
-distance_label = label(pos=vector(0, -2.5, 0), text="Distance moved: ")
 
-# Initial states
+# Labels for acceleration
+accel_label_x = label(pos=vector(0, -2.5, 0), text="Accel X: 0.00 m/s²", color=vector(1, 0, 0))
+accel_label_y = label(pos=vector(0, -2.8, 0), text="Accel Y: 0.00 m/s²", color=vector(0, 1, 0))
+accel_label_z = label(pos=vector(0, -3.1, 0), text="Accel Z: 0.00 m/s²", color=vector(0, 0, 1))
+
+# Initial orientation (calibration step)
+initial_orientation = np.array([0.0, 0.0, 0.0])  # Reference orientation (calibrated)
 orientation = np.array([0.0, 0.0, 0.0])  # Tracks filtered orientation
-velocity = np.array([0.0, 0.0, 0.0])  # Initial velocity
-position = np.array([0.0, 0.0, 0.0])  # Initial position
-
-# Calibration step
-initial_orientation = np.array([0.0, 0.0, 0.0])
 
 def calibrate_sensor(bus):
     """Calibrate the sensor to get the initial orientation."""
@@ -77,7 +79,6 @@ def calibrate_sensor(bus):
     for _ in range(50):
         accel, _ = read_accel_gyro(bus)
         samples.append(accel)
-        time.sleep(0.01)
     avg_accel = np.mean(samples, axis=0)
     initial_orientation[0] = np.arctan2(avg_accel[1], avg_accel[2]) * 180 / np.pi
     initial_orientation[1] = np.arctan2(-avg_accel[0], np.sqrt(avg_accel[1]**2 + avg_accel[2]**2)) * 180 / np.pi
@@ -108,13 +109,12 @@ def get_rotation_matrix(pitch, roll, yaw):
 
 # Main Program
 def run_visualization():
-    global orientation, velocity, position
+    global orientation
 
     with SMBus(I2C_BUS) as bus:
         setup_mpu(bus)
         calibrate_sensor(bus)
 
-        last_update_time = time.time()
         while True:
             rate(50)  # Update rate 50 Hz
             accel, gyro = read_accel_gyro(bus)
@@ -123,18 +123,10 @@ def run_visualization():
             accel_pitch = np.arctan2(accel[1], accel[2]) * 180 / np.pi
             accel_roll = np.arctan2(-accel[0], np.sqrt(accel[1]**2 + accel[2]**2)) * 180 / np.pi
 
-            # Complementary filter for orientation
+            # Complementary filter to combine accelerometer and gyroscope data
             orientation[0] = alpha * (orientation[0] + gyro[0] * dt) + (1 - alpha) * (accel_roll - initial_orientation[0])
             orientation[1] = alpha * (orientation[1] + gyro[1] * dt) + (1 - alpha) * (accel_pitch - initial_orientation[1])
             orientation[2] += gyro[2] * dt  # Gyroscope-only yaw
-
-            # Gravity compensation
-            accel_corrected = accel * gravity
-            accel_corrected[2] -= gravity
-
-            # Update velocity and position
-            velocity += accel_corrected * dt
-            position += velocity * dt
 
             # Update rotation matrix
             R = get_rotation_matrix(orientation[1], orientation[0], orientation[2])
@@ -143,14 +135,13 @@ def run_visualization():
             mpu_box.axis = vector(R[0, 2], R[1, 2], R[2, 2])
             mpu_box.up = vector(R[0, 1], R[1, 1], R[2, 1])
 
-            # Update labels
+            # Update angle labels
             angle_label.text = f"Angles (Pitch, Roll, Yaw): {np.round(orientation, 2)}"
-            distance_label.text = f"Distance (cm): X={position[0]*100:.2f}, Y={position[1]*100:.2f}, Z={position[2]*100:.2f}"
 
-            # Print distance every update interval
-            if time.time() - last_update_time >= distance_update_interval:
-                print(f"Distance moved (5s): {np.linalg.norm(position) * 100:.2f} cm")
-                last_update_time = time.time()
+            # Update acceleration labels
+            accel_label_x.text = f"Accel X: {accel[0] * gravity:.2f} m/s²"
+            accel_label_y.text = f"Accel Y: {accel[1] * gravity:.2f} m/s²"
+            accel_label_z.text = f"Accel Z: {accel[2] * gravity:.2f} m/s²"
 
 # Run the visualization
 run_visualization()
