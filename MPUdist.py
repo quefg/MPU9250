@@ -45,7 +45,7 @@ def setup_mpu(bus):
 
 # Visualization Setup
 scene.background = vector(0.2, 0.2, 0.2)
-scene.title = "MPU9250 3D Visualization with Acceleration Display"
+scene.title = "MPU9250 3D Visualization with Distance Display"
 scene.range = 2  # Adjust the view range
 
 # Draw reference XYZ axes
@@ -58,13 +58,16 @@ mpu_box = box(
     color=vector(0, 1, 0)
 )
 
-# Labels for angles and acceleration
+# Labels for angles, acceleration, and distance
 angle_label = label(pos=vector(0, -2, 0), text="Angles: ")
 acceleration_label = label(pos=vector(0, -2.5, 0), text="Acceleration: ")
+distance_label = label(pos=vector(0, -3, 0), text="Distance: ")
 
 # Initial orientation and displacement
 initial_orientation = np.array([0.0, 0.0, 0.0])  # Reference orientation (calibrated)
 orientation = np.array([0.0, 0.0, 0.0])  # Tracks filtered orientation
+velocity = np.array([0.0, 0.0, 0.0])  # Initial velocity (vx, vy, vz) in m/s
+position = np.array([0.0, 0.0, 0.0])  # Initial position (x, y, z) in meters
 
 def calibrate_sensor(bus):
     """Calibrate the sensor to get the initial orientation."""
@@ -103,9 +106,25 @@ def get_rotation_matrix(pitch, roll, yaw):
     ])
     return R_z @ R_y @ R_x
 
+def update_position(accel, dt):
+    """Update position and velocity based on acceleration."""
+    global velocity, position
+
+    # Convert accelerometer readings to m/s² and subtract gravity in the Z-axis
+    accel_corrected = accel * gravity  # Convert g to m/s²
+    accel_corrected[2] -= gravity  # Remove gravity from Z-axis
+
+    # Update velocity (v = u + at)
+    velocity += accel_corrected * dt
+
+    # Update position (s = ut + 0.5 * a * t²)
+    position += velocity * dt + 0.5 * accel_corrected * dt**2
+
+    return position
+
 # Main Program
 def run_visualization():
-    global orientation
+    global orientation, position
 
     with SMBus(I2C_BUS) as bus:
         setup_mpu(bus)
@@ -131,12 +150,16 @@ def run_visualization():
             mpu_box.axis = vector(R[0, 2], R[1, 2], R[2, 2])
             mpu_box.up = vector(R[0, 1], R[1, 1], R[2, 1])
 
-            # Convert accelerometer readings to m/s²
-            accel_corrected = accel * gravity  # Convert g to m/s²
+            # Update position based on accelerometer
+            position = update_position(accel, dt)
+
+            # Calculate total distance moved
+            distance = np.linalg.norm(position)  # Euclidean distance from origin
 
             # Update labels
             angle_label.text = f"Angles (Pitch, Roll, Yaw): {np.round(orientation, 2)}"
-            acceleration_label.text = f"Acceleration (x, y, z): {np.round(accel_corrected, 2)} m/s²"
+            acceleration_label.text = f"Acceleration (x, y, z): {np.round(accel * gravity, 2)} m/s²"
+            distance_label.text = f"Distance moved: {np.round(distance * 100, 2)} cm"
 
 # Run the visualization
 run_visualization()
