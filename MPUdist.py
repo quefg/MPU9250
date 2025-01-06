@@ -16,12 +16,14 @@ PWR_MGMT_1 = 0x6B
 dt = 0.02  # Sampling period in seconds (50 Hz)
 alpha = 0.98  # Complementary filter coefficient
 gravity = 9.81  # Gravity in m/s^2
+threshold = 0.1  # Stationary threshold for acceleration (m/s²)
 
-# Initial velocity and position
+# Initial velocity, position, and previous state
 velocity = np.array([0.0, 0.0, 0.0])  # Initial velocity (vx, vy, vz) in m/s
 position = np.array([0.0, 0.0, 0.0])  # Initial position (x, y, z) in meters
 previous_position = np.array([0.0, 0.0, 0.0])  # Initial previous position for relative distance
 time_since_last_update = 0  # Time tracker for relative distance calculation
+previous_accel = np.array([0.0, 0.0, 0.0])  # Previous accelerometer reading for low-pass filter
 
 # I2C Functions
 def read_i2c_word(bus, addr, reg):
@@ -65,9 +67,9 @@ def calibrate_accelerometer(bus):
     print(f"Calibration complete. Bias: {bias}")
     return bias
 
-def apply_threshold(accel, threshold=0.05):
-    """Zero out small acceleration values below the threshold."""
-    return np.where(np.abs(accel) > threshold, accel, 0.0)
+def apply_low_pass_filter(accel, previous_accel, alpha=0.98):
+    """Apply a simple low-pass filter to smooth accelerometer data."""
+    return alpha * previous_accel + (1 - alpha) * accel
 
 def reset_velocity_if_stationary(accel, velocity, threshold=0.1):
     """Reset velocity if the device is stationary."""
@@ -91,13 +93,12 @@ mpu_box = box(
 )
 
 # Labels for angles, acceleration, and distance
-angle_label = label(pos=vector(0, -2, 0), text="Angles: ")
 acceleration_label = label(pos=vector(0, -2.5, 0), text="Acceleration: ")
 distance_label = label(pos=vector(0, -3, 0), text="Distance: ")
 
 # Main Program
 def run_visualization():
-    global velocity, position, previous_position, time_since_last_update
+    global velocity, position, previous_position, time_since_last_update, previous_accel
 
     with SMBus(I2C_BUS) as bus:
         setup_mpu(bus)
@@ -114,20 +115,21 @@ def run_visualization():
             # Apply calibration to remove bias
             accel -= calibration_bias
 
-            # Threshold small values to zero
-            accel = apply_threshold(accel)
+            # Apply low-pass filter to smooth noise
+            accel = apply_low_pass_filter(accel, previous_accel)
+            previous_accel = accel.copy()
 
             # Convert accelerometer readings to m/s²
             accel_corrected = accel * gravity
             accel_corrected[2] -= gravity  # Remove gravity component from Z-axis
 
             # Update velocity and position
-            velocity = reset_velocity_if_stationary(accel_corrected, velocity)
+            velocity = reset_velocity_if_stationary(accel_corrected, velocity, threshold)
             velocity += accel_corrected * dt
             position += velocity * dt + 0.5 * accel_corrected * dt**2
 
             # Calculate relative distance from the previous position
-            relative_distance = np.linalg.norm(position - previous_position)  # Distance moved since last update
+            relative_distance = np.linalg.norm(position - previous_position)
 
             # Update the previous position every 5 seconds
             if time_since_last_update >= 5.0:  # 5-second interval
