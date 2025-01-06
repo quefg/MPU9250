@@ -17,18 +17,21 @@ dt = 0.02  # Sampling period in seconds (50 Hz)
 alpha = 0.98  # Complementary filter coefficient
 gravity = 9.81  # Gravity in m/s²
 low_pass_alpha = 0.9  # For low-pass filtering
-initial_position = np.array([0.0, 0.0, 0.0])  # Starting point
+threshold = 0.1  # Threshold for stationary detection
+reset_interval = 5  # Reset position every 5 seconds
 
 # Initial states
 velocity = np.array([0.0, 0.0, 0.0])  # Initial velocity (vx, vy, vz)
 position = np.array([0.0, 0.0, 0.0])  # Initial position (x, y, z)
+relative_position = np.array([0.0, 0.0, 0.0])  # Initial relative position
+previous_accel = np.array([0.0, 0.0, 0.0])  # Previous filtered acceleration
 orientation = np.array([0.0, 0.0, 0.0])  # Tracks filtered orientation
 initial_orientation = np.array([0.0, 0.0, 0.0])  # Reference orientation for angles
-previous_accel = np.array([0.0, 0.0, 0.0])  # Previous filtered acceleration
+last_reset_time = time.time()  # Time of the last reset
 
 # Visualization Setup
 scene.background = vector(0.2, 0.2, 0.2)
-scene.title = "MPU9250 3D Motion Tracking"
+scene.title = "MPU9250 3D Motion Tracking with Drift Correction"
 scene.range = 2
 
 # Draw reference XYZ axes
@@ -111,7 +114,7 @@ def get_rotation_matrix(pitch, roll, yaw):
 
 # Main Program
 def run_visualization():
-    global orientation, velocity, position, previous_accel
+    global orientation, velocity, position, relative_position, previous_accel, last_reset_time
 
     with SMBus(I2C_BUS) as bus:
         setup_mpu(bus)
@@ -125,16 +128,25 @@ def run_visualization():
             accel_corrected = accel * gravity
             accel_corrected[2] -= gravity  # Remove gravity from Z-axis
 
-            # Apply low-pass filter to smooth acceleration
+            # Apply low-pass filter
             accel_filtered = low_pass_alpha * previous_accel + (1 - low_pass_alpha) * accel_corrected
             previous_accel = accel_filtered
 
-            # Update velocity and position using trapezoidal integration
+            # Detect stationary and reset velocity
+            if np.linalg.norm(accel_filtered) < threshold:
+                velocity = np.array([0.0, 0.0, 0.0])
+
+            # Update velocity and position
             velocity += accel_filtered * dt
             position += velocity * dt
 
-            # Calculate relative position
-            relative_position = position - initial_position
+            # Reset relative position periodically
+            if time.time() - last_reset_time >= reset_interval:
+                relative_position = np.array([0.0, 0.0, 0.0])
+                position = np.array([0.0, 0.0, 0.0])
+                last_reset_time = time.time()
+
+            relative_position = position
 
             # Calculate tilt angles
             accel_pitch = np.arctan2(accel[1], accel[2]) * 180 / np.pi
