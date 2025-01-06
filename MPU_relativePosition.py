@@ -15,8 +15,9 @@ PWR_MGMT_1 = 0x6B
 # Constants
 dt = 0.02  # Sampling period in seconds (50 Hz)
 alpha = 0.98  # Complementary filter coefficient
-gravity = 9.81  # Gravity in m/s^2
-velocity_threshold = 0.1  # Threshold to detect stationary motion
+gravity = 9.81  # Gravity in m/s²
+velocity_threshold = 0.05  # Threshold to detect stationary motion (cm/s)
+noise_threshold = 0.02  # Ignore small accelerometer values (g)
 prev_accel = np.array([0.0, 0.0, 0.0])  # For low-pass filtering
 
 # I2C Functions
@@ -68,28 +69,13 @@ accel_label_x = label(pos=vector(0, -2.5, 0), text="Accel X: 0.00 m/s²", color=
 accel_label_y = label(pos=vector(0, -2.8, 0), text="Accel Y: 0.00 m/s²", color=vector(0, 1, 0))
 accel_label_z = label(pos=vector(0, -3.1, 0), text="Accel Z: 0.00 m/s²", color=vector(0, 0, 1))
 
-# Labels for distance
-distance_label = label(pos=vector(0, -3.5, 0), text="Distance: X=0.00 m, Y=0.00 m, Z=0.00 m", color=vector(1, 1, 1))
+# Labels for distance in cm
+distance_label = label(pos=vector(0, -3.5, 0), text="Distance: X=0.00 cm, Y=0.00 cm, Z=0.00 cm", color=vector(1, 1, 1))
 
-# Initial orientation (calibration step)
-initial_orientation = np.array([0.0, 0.0, 0.0])  # Reference orientation (calibrated)
-orientation = np.array([0.0, 0.0, 0.0])  # Tracks filtered orientation
-velocity = np.array([0.0, 0.0, 0.0])  # Initial velocity in m/s
-distance = np.array([0.0, 0.0, 0.0])  # Initial distance in meters
-
-def calibrate_sensor(bus):
-    """Calibrate the sensor to get the initial orientation."""
-    global initial_orientation
-    print("Calibrating sensor... Place it upright on a flat surface.")
-    time.sleep(3)
-    samples = []
-    for _ in range(50):
-        accel, _ = read_accel_gyro(bus)
-        samples.append(accel)
-    avg_accel = np.mean(samples, axis=0)
-    initial_orientation[0] = np.arctan2(avg_accel[1], avg_accel[2]) * 180 / np.pi
-    initial_orientation[1] = np.arctan2(-avg_accel[0], np.sqrt(avg_accel[1]**2 + avg_accel[2]**2)) * 180 / np.pi
-    print(f"Initial orientation: {initial_orientation}")
+# Initialize state variables
+velocity = np.array([0.0, 0.0, 0.0])  # Velocity in m/s
+distance = np.array([0.0, 0.0, 0.0])  # Distance in cm
+prev_accel = np.array([0.0, 0.0, 0.0])  # For low-pass filtering
 
 def low_pass_filter(accel, prev_accel, alpha=0.5):
     """Apply a low-pass filter to smooth acceleration data."""
@@ -106,47 +92,26 @@ def reset_velocity_if_stationary(gyro):
     if np.linalg.norm(gyro) < velocity_threshold:  # Check if angular velocity is below threshold
         velocity[:] = 0.0
 
-def get_rotation_matrix(pitch, roll, yaw):
-    """Calculate the 3D rotation matrix."""
-    pitch = np.radians(pitch)
-    roll = np.radians(roll)
-    yaw = np.radians(yaw)
-
-    R_x = np.array([
-        [1, 0, 0],
-        [0, np.cos(roll), -np.sin(roll)],
-        [0, np.sin(roll), np.cos(roll)]
-    ])
-    R_y = np.array([
-        [np.cos(pitch), 0, np.sin(pitch)],
-        [0, 1, 0],
-        [-np.sin(pitch), 0, np.cos(pitch)]
-    ])
-    R_z = np.array([
-        [np.cos(yaw), -np.sin(yaw), 0],
-        [np.sin(yaw), np.cos(yaw), 0],
-        [0, 0, 1]
-    ])
-    return R_z @ R_y @ R_x
-
 # Main Program
 def run_visualization():
-    global orientation, velocity, distance, prev_accel
+    global velocity, distance, prev_accel
 
     with SMBus(I2C_BUS) as bus:
         setup_mpu(bus)
-        calibrate_sensor(bus)
 
         while True:
             rate(50)  # Update rate 50 Hz
             accel, gyro = read_accel_gyro(bus)
 
-            # Low-pass filter for acceleration
+            # Apply low-pass filter to acceleration
             accel = low_pass_filter(accel, prev_accel)
             prev_accel = accel
 
-            # High-pass filter to remove gravity
+            # Remove gravity (high-pass filter)
             accel_no_gravity = high_pass_filter(accel)
+
+            # Ignore small acceleration values below noise threshold
+            accel_no_gravity[np.abs(accel_no_gravity) < noise_threshold] = 0
 
             # Reset velocity if stationary
             reset_velocity_if_stationary(gyro)
@@ -154,35 +119,14 @@ def run_visualization():
             # Update velocity (v = u + at)
             velocity += accel_no_gravity * gravity * dt
 
-            # Update distance (s = s + vt)
-            distance += velocity * dt
+            # Update distance (s = s + vt, converted to cm)
+            distance += velocity * dt * 100  # Convert m to cm
 
-            # Calculate tilt angles from accelerometer
-            accel_pitch = np.arctan2(accel[1], accel[2]) * 180 / np.pi
-            accel_roll = np.arctan2(-accel[0], np.sqrt(accel[1]**2 + accel[2]**2)) * 180 / np.pi
-
-            # Complementary filter to combine accelerometer and gyroscope data
-            orientation[0] = alpha * (orientation[0] + gyro[0] * dt) + (1 - alpha) * (accel_roll - initial_orientation[0])
-            orientation[1] = alpha * (orientation[1] + gyro[1] * dt) + (1 - alpha) * (accel_pitch - initial_orientation[1])
-            orientation[2] += gyro[2] * dt  # Gyroscope-only yaw
-
-            # Update rotation matrix
-            R = get_rotation_matrix(orientation[1], orientation[0], orientation[2])
-
-            # Apply rotation matrix to box
-            mpu_box.axis = vector(R[0, 2], R[1, 2], R[2, 2])
-            mpu_box.up = vector(R[0, 1], R[1, 1], R[2, 1])
-
-            # Update angle labels
-            angle_label.text = f"Angles (Pitch, Roll, Yaw): {np.round(orientation, 2)}"
-
-            # Update acceleration labels
+            # Update labels
             accel_label_x.text = f"Accel X: {accel[0] * gravity:.2f} m/s²"
             accel_label_y.text = f"Accel Y: {accel[1] * gravity:.2f} m/s²"
             accel_label_z.text = f"Accel Z: {accel[2] * gravity:.2f} m/s²"
-
-            # Update distance label
-            distance_label.text = f"Distance: X={distance[0]:.2f} m, Y={distance[1]:.2f} m, Z={distance[2]:.2f} m"
+            distance_label.text = f"Distance: X={distance[0]:.2f} cm, Y={distance[1]:.2f} cm, Z={distance[2]:.2f} cm"
 
 # Run the visualization
 run_visualization()
