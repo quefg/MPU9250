@@ -157,9 +157,23 @@ def run_visualization():
             velocity += accel_corrected * dt
             position += velocity * dt + 0.5 * accel_corrected * dt**2
 
+            # Update orientation using gyroscope data
+            orientation = update_orientation(gyro, orientation, dt)
+
+            # Compute rotation matrix and apply to the 3D box
+            R = get_rotation_matrix(orientation[0], orientation[1], orientation[2])
+            mpu_box.axis = vector(R[0, 2], R[1, 2], R[2, 2])
+            mpu_box.up = vector(R[0, 1], R[1, 1], R[2, 1])
+
+            # Calculate distance traveled every 5 seconds
+            if time_since_last_update >= 5.0:  # Update distance every 5 seconds
+                relative_distance = np.linalg.norm(position - previous_position)
+                previous_position = position.copy()
+                time_since_last_update = 0
+                distance_label.text = f"Distance Traveled: {np.round(relative_distance * 100, 2)} cm"
+
             # Update labels
             acceleration_label.text = f"Acceleration (x, y, z): {np.round(accel_corrected, 2)} m/s²"
-            distance_label.text = f"Current Position: {np.round(position * 100, 2)} cm"
 
 # Run the visualization
 run_visualization()
