@@ -16,6 +16,8 @@ PWR_MGMT_1 = 0x6B
 dt = 0.02  # Sampling period in seconds (50 Hz)
 alpha = 0.98  # Complementary filter coefficient
 gravity = 9.81  # Gravity in m/s^2
+velocity_threshold = 0.1  # Threshold to detect stationary motion
+prev_accel = np.array([0.0, 0.0, 0.0])  # For low-pass filtering
 
 # I2C Functions
 def read_i2c_word(bus, addr, reg):
@@ -89,6 +91,21 @@ def calibrate_sensor(bus):
     initial_orientation[1] = np.arctan2(-avg_accel[0], np.sqrt(avg_accel[1]**2 + avg_accel[2]**2)) * 180 / np.pi
     print(f"Initial orientation: {initial_orientation}")
 
+def low_pass_filter(accel, prev_accel, alpha=0.5):
+    """Apply a low-pass filter to smooth acceleration data."""
+    return alpha * accel + (1 - alpha) * prev_accel
+
+def high_pass_filter(accel):
+    """Remove gravity from acceleration data."""
+    accel[2] -= 1.0  # Assuming gravity on Z-axis
+    return accel
+
+def reset_velocity_if_stationary(gyro):
+    """Reset velocity if the sensor is stationary."""
+    global velocity
+    if np.linalg.norm(gyro) < velocity_threshold:  # Check if angular velocity is below threshold
+        velocity[:] = 0.0
+
 def get_rotation_matrix(pitch, roll, yaw):
     """Calculate the 3D rotation matrix."""
     pitch = np.radians(pitch)
@@ -112,14 +129,9 @@ def get_rotation_matrix(pitch, roll, yaw):
     ])
     return R_z @ R_y @ R_x
 
-def high_pass_filter(accel):
-    """Remove gravity from acceleration data."""
-    accel[2] -= 1.0  # Assuming gravity on Z-axis
-    return accel
-
 # Main Program
 def run_visualization():
-    global orientation, velocity, distance
+    global orientation, velocity, distance, prev_accel
 
     with SMBus(I2C_BUS) as bus:
         setup_mpu(bus)
@@ -129,8 +141,15 @@ def run_visualization():
             rate(50)  # Update rate 50 Hz
             accel, gyro = read_accel_gyro(bus)
 
+            # Low-pass filter for acceleration
+            accel = low_pass_filter(accel, prev_accel)
+            prev_accel = accel
+
             # High-pass filter to remove gravity
             accel_no_gravity = high_pass_filter(accel)
+
+            # Reset velocity if stationary
+            reset_velocity_if_stationary(gyro)
 
             # Update velocity (v = u + at)
             velocity += accel_no_gravity * gravity * dt
