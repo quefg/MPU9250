@@ -17,6 +17,7 @@ dt = 0.02  # Sampling period in seconds (50 Hz)
 alpha = 0.98  # Complementary filter coefficient
 gravity = 9.81  # Gravity in m/s^2
 gyro_scale = 131.0  # Scale for ±250°/s
+threshold = 0.1  # Threshold for stationary detection (m/s²)
 
 # Initial states
 velocity = np.array([0.0, 0.0, 0.0])  # Initial velocity (vx, vy, vz) in m/s
@@ -72,7 +73,7 @@ def apply_low_pass_filter(accel, previous_accel, alpha=0.98):
     """Apply a simple low-pass filter to smooth accelerometer data."""
     return alpha * previous_accel + (1 - alpha) * accel
 
-def reset_velocity_if_stationary(accel, velocity, threshold=0.1):
+def reset_velocity_if_stationary(accel, velocity, threshold):
     """Reset velocity if the device is stationary."""
     if np.linalg.norm(accel) < threshold:
         return np.array([0.0, 0.0, 0.0])
