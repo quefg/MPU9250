@@ -20,6 +20,8 @@ gravity = 9.81  # Gravity in m/s^2
 # Initial velocity and position
 velocity = np.array([0.0, 0.0, 0.0])  # Initial velocity (vx, vy, vz) in m/s
 position = np.array([0.0, 0.0, 0.0])  # Initial position (x, y, z) in meters
+previous_position = np.array([0.0, 0.0, 0.0])  # Initial previous position for relative distance
+time_since_last_update = 0  # Time tracker for relative distance calculation
 
 # I2C Functions
 def read_i2c_word(bus, addr, reg):
@@ -95,7 +97,7 @@ distance_label = label(pos=vector(0, -3, 0), text="Distance: ")
 
 # Main Program
 def run_visualization():
-    global velocity, position
+    global velocity, position, previous_position, time_since_last_update
 
     with SMBus(I2C_BUS) as bus:
         setup_mpu(bus)
@@ -105,6 +107,8 @@ def run_visualization():
 
         while True:
             rate(50)  # Update rate 50 Hz
+            time_since_last_update += dt  # Increment time tracker
+
             accel, gyro = read_accel_gyro(bus)
 
             # Apply calibration to remove bias
@@ -122,12 +126,18 @@ def run_visualization():
             velocity += accel_corrected * dt
             position += velocity * dt + 0.5 * accel_corrected * dt**2
 
-            # Calculate total distance moved
-            distance = np.linalg.norm(position)  # Euclidean distance from origin
+            # Calculate relative distance from the previous position
+            relative_distance = np.linalg.norm(position - previous_position)  # Distance moved since last update
+
+            # Update the previous position every 5 seconds
+            if time_since_last_update >= 5.0:  # 5-second interval
+                previous_position = position.copy()
+                time_since_last_update = 0  # Reset the time tracker
 
             # Update labels
             acceleration_label.text = f"Acceleration (x, y, z): {np.round(accel_corrected, 2)} m/s²"
-            distance_label.text = f"Distance moved: {np.round(distance * 100, 2)} cm"
+            distance_label.text = (f"Relative Distance moved: {np.round(relative_distance * 100, 2)} cm\n"
+                                   f"Current Position: {np.round(position * 100, 2)} cm")
 
 # Run the visualization
 run_visualization()
