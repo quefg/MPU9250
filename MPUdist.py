@@ -16,8 +16,6 @@ PWR_MGMT_1 = 0x6B
 dt = 0.02  # Sampling period in seconds (50 Hz)
 alpha = 0.98  # Complementary filter coefficient
 gravity = 9.81  # Gravity in m/s^2
-stable_threshold = 0.02  # Threshold for stability in acceleration
-stable_time = 5  # Time in seconds for the sensor to be considered stable
 
 # I2C Functions
 def read_i2c_word(bus, addr, reg):
@@ -47,7 +45,7 @@ def setup_mpu(bus):
 
 # Visualization Setup
 scene.background = vector(0.2, 0.2, 0.2)
-scene.title = "MPU9250 3D Visualization"
+scene.title = "MPU9250 3D Visualization with Distance Calculation"
 scene.range = 2  # Adjust the view range
 
 # Draw reference XYZ axes
@@ -60,17 +58,15 @@ mpu_box = box(
     color=vector(0, 1, 0)
 )
 
-# Labels for angles and distance
+# Labels for angles and displacement
 angle_label = label(pos=vector(0, -2, 0), text="Angles: ")
-distance_label = label(pos=vector(0, -2.5, 0), text="Distance: ")
+displacement_label = label(pos=vector(0, -2.5, 0), text="Displacement: ")
 
-# Initial orientation (calibration step)
+# Initial orientation and displacement
 initial_orientation = np.array([0.0, 0.0, 0.0])  # Reference orientation (calibrated)
 orientation = np.array([0.0, 0.0, 0.0])  # Tracks filtered orientation
-velocity = np.array([0.0, 0.0, 0.0])  # Velocity in m/s
-position = np.array([0.0, 0.0, 0.0])  # Position in meters
-stable_start_time = None  # Time when stability starts
-measuring_distance = False  # Flag for measuring distance
+velocity = np.array([0.0, 0.0, 0.0])  # Initial velocity (vx, vy, vz) in m/s
+position = np.array([0.0, 0.0, 0.0])  # Initial position (x, y, z) in meters
 
 def calibrate_sensor(bus):
     """Calibrate the sensor to get the initial orientation."""
@@ -86,13 +82,48 @@ def calibrate_sensor(bus):
     initial_orientation[1] = np.arctan2(-avg_accel[0], np.sqrt(avg_accel[1]**2 + avg_accel[2]**2)) * 180 / np.pi
     print(f"Initial orientation: {initial_orientation}")
 
-def is_stable(accel):
-    """Check if the accelerometer readings are stable."""
-    return np.all(np.abs(accel) < stable_threshold)
+def get_rotation_matrix(pitch, roll, yaw):
+    """Calculate the 3D rotation matrix."""
+    pitch = np.radians(pitch)
+    roll = np.radians(roll)
+    yaw = np.radians(yaw)
+
+    R_x = np.array([
+        [1, 0, 0],
+        [0, np.cos(roll), -np.sin(roll)],
+        [0, np.sin(roll), np.cos(roll)]
+    ])
+    R_y = np.array([
+        [np.cos(pitch), 0, np.sin(pitch)],
+        [0, 1, 0],
+        [-np.sin(pitch), 0, np.cos(pitch)]
+    ])
+    R_z = np.array([
+        [np.cos(yaw), -np.sin(yaw), 0],
+        [np.sin(yaw), np.cos(yaw), 0],
+        [0, 0, 1]
+    ])
+    return R_z @ R_y @ R_x
+
+def update_position(accel, dt):
+    """Update position and velocity based on acceleration."""
+    global velocity, position
+
+    # Convert accelerometer readings to m/s² and subtract gravity in the Z-axis
+    accel_corrected = accel * gravity  # Convert g to m/s²
+    accel_corrected[2] -= gravity  # Remove gravity from Z-axis
+
+    # Update velocity (v = u + at)
+    velocity += accel_corrected * dt
+
+    # Update position (s = ut + 0.5 * a * t²)
+    position += velocity * dt + 0.5 * accel_corrected * dt**2
+
+    return position
 
 # Main Program
 def run_visualization():
-    global orientation, velocity, position, stable_start_time, measuring_distance
+    global orientation, position
 
     with SMBus(I2C_BUS) as bus:
         setup_mpu(bus)
@@ -102,50 +133,28 @@ def run_visualization():
             rate(50)  # Update rate 50 Hz
             accel, gyro = read_accel_gyro(bus)
 
-            # Remove gravity from accelerometer data
-            linear_accel = accel * gravity  # Convert to m/s^2
-            linear_accel[2] -= gravity  # Subtract gravity from Z-axis
-
-            # Check if the device is stable
-            if is_stable(accel):
-                if stable_start_time is None:
-                    stable_start_time = time.time()
-                elif time.time() - stable_start_time >= stable_time and not measuring_distance:
-                    measuring_distance = True
-                    velocity = np.array([0.0, 0.0, 0.0])
-                    position = np.array([0.0, 0.0, 0.0])
-                    print("Device stable for 5 seconds. Measuring distance.")
-            else:
-                stable_start_time = None
-
-            # Measure distance only if movement is detected
-            if measuring_distance and not is_stable(accel):
-                # Integrate acceleration to calculate velocity
-                velocity += linear_accel * dt
-
-                # Integrate velocity to calculate position
-                position += velocity * dt
-
             # Calculate tilt angles from accelerometer
             accel_pitch = np.arctan2(accel[1], accel[2]) * 180 / np.pi
             accel_roll = np.arctan2(-accel[0], np.sqrt(accel[1]**2 + accel[2]**2)) * 180 / np.pi
 
             # Complementary filter to combine accelerometer and gyroscope data
-            orientation[0] = alpha * (orientation[0] + gyro[0] * dt) + (1 - alpha) * accel_roll
-            orientation[1] = alpha * (orientation[1] + gyro[1] * dt) + (1 - alpha) * accel_pitch
+            orientation[0] = alpha * (orientation[0] + gyro[0] * dt) + (1 - alpha) * (accel_roll - initial_orientation[0])
+            orientation[1] = alpha * (orientation[1] + gyro[1] * dt) + (1 - alpha) * (accel_pitch - initial_orientation[1])
             orientation[2] += gyro[2] * dt  # Gyroscope-only yaw
 
-            # Update 3D visualization
-            mpu_box.axis = vector(
-                np.sin(np.radians(orientation[0])),
-                np.sin(np.radians(orientation[1])),
-                np.cos(np.radians(orientation[2]))
-            )
-            mpu_box.up = vector(0, 1, 0)
+            # Update rotation matrix
+            R = get_rotation_matrix(orientation[1], orientation[0], orientation[2])
+
+            # Apply rotation matrix to box
+            mpu_box.axis = vector(R[0, 2], R[1, 2], R[2, 2])
+            mpu_box.up = vector(R[0, 1], R[1, 1], R[2, 1])
+
+            # Update position based on accelerometer
+            position = update_position(accel, dt)
 
             # Update labels
             angle_label.text = f"Angles (Pitch, Roll, Yaw): {np.round(orientation, 2)}"
-            distance_label.text = f"Distance (X, Y, Z): {np.round(position, 2)}"
+            displacement_label.text = f"Displacement (x, y, z): {np.round(position, 2)} m"
 
 # Run the visualization
 run_visualization()
