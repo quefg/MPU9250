@@ -60,13 +60,14 @@ mpu_box = box(
 
 # Labels for angles and displacement
 angle_label = label(pos=vector(0, -2, 0), text="Angles: ")
-displacement_label = label(pos=vector(0, -2.5, 0), text="Displacement: ")
+distance_label = label(pos=vector(0, -2.5, 0), text="Distance: ")
 
 # Initial orientation and displacement
 initial_orientation = np.array([0.0, 0.0, 0.0])  # Reference orientation (calibrated)
 orientation = np.array([0.0, 0.0, 0.0])  # Tracks filtered orientation
 velocity = np.array([0.0, 0.0, 0.0])  # Initial velocity (vx, vy, vz) in m/s
 position = np.array([0.0, 0.0, 0.0])  # Initial position (x, y, z) in meters
+initial_position = np.array([0.0, 0.0, 0.0])  # Store the starting position
 
 def calibrate_sensor(bus):
     """Calibrate the sensor to get the initial orientation."""
@@ -123,7 +124,7 @@ def update_position(accel, dt):
 
 # Main Program
 def run_visualization():
-    global orientation, position
+    global orientation, position, initial_position
 
     with SMBus(I2C_BUS) as bus:
         setup_mpu(bus)
@@ -149,12 +150,13 @@ def run_visualization():
             mpu_box.axis = vector(R[0, 2], R[1, 2], R[2, 2])
             mpu_box.up = vector(R[0, 1], R[1, 1], R[2, 1])
 
-            # Update position based on accelerometer
+            # Update position and calculate distance
             position = update_position(accel, dt)
+            distance = np.linalg.norm(position - initial_position) * 100  # Convert to cm
 
             # Update labels
             angle_label.text = f"Angles (Pitch, Roll, Yaw): {np.round(orientation, 2)}"
-            displacement_label.text = f"Displacement (x, y, z): {np.round(position, 2)} m"
+            distance_label.text = f"Distance: {np.round(distance, 2)} cm"
 
 # Run the visualization
 run_visualization()
