@@ -66,7 +66,7 @@ def read_acceleration():
         calibrate_sensor(bus)  # Perform calibration
 
         while True:
-            try:
+            
                 ax, ay, az = read_accel(bus)
 
                 # Cancel gravitational effect to correct the raw acceleration
@@ -82,12 +82,7 @@ def read_acceleration():
 
                 time.sleep(0.1)
 
-            except OSError as e:
-                if e.errno == 6:
-                    print("I2C device not found. Please check the connection.")
-                    break
-                else:
-                    raise
+
 
 # Run the acceleration reading
 read_acceleration()
